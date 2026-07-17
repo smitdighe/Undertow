@@ -1,0 +1,7 @@
+# Root .gitignore anchors /node_modules and /.next to the repo root, so this
+# workspace needs its own.
+/node_modules
+/.next/
+/out/
+*.tsbuildinfo
+next-env.d.ts

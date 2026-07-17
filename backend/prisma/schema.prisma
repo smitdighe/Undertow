@@ -1,0 +1,141 @@
+// Undertow — Phase 1 database layer
+// docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ONCALL
+  VIEWER
+}
+
+enum Severity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum Status {
+  OPEN
+  DUPLICATE
+  RESOLVED
+  ESCALATED
+}
+
+model User {
+  id            String       @id @default(cuid())
+  email         String       @unique
+  username      String?      @unique
+  password      String?
+  role          Role         @default(VIEWER)
+  // NextAuth adapter fields (populated on OAuth sign-in)
+  name          String?
+  image         String?
+  emailVerified DateTime?
+  accounts      Account[]
+  sessions      Session[]
+  corrections   Correction[]
+  createdAt     DateTime     @default(now())
+}
+
+model Incident {
+  id            String       @id @default(cuid())
+  source        String
+  externalId    String       @unique
+  title         String
+  body          String
+  severity      Severity
+  status        Status       @default(OPEN)
+  duplicateOfId String?
+  duplicateOf   Incident?    @relation("Duplicates", fields: [duplicateOfId], references: [id])
+  duplicates    Incident[]   @relation("Duplicates")
+  suggestedTeam String?
+  draftResponse String?
+  embedding     Float[]
+  corrections   Correction[]
+  createdAt     DateTime     @default(now())
+}
+
+model Correction {
+  id             String   @id @default(cuid())
+  incidentId     String
+  incident       Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  field          String
+  originalValue  String
+  correctedValue String
+  createdAt      DateTime @default(now())
+}
+
+enum JobType {
+  CLASSIFY
+  EVAL
+}
+
+enum JobStatus {
+  PENDING
+  CLAIMED
+  DONE
+  FAILED
+}
+
+model Job {
+  id        String    @id @default(cuid())
+  type      JobType
+  payload   Json
+  // Handler output, written before the job is completed. Lets an async caller
+  // poll a job id for its result (e.g. EVAL jobs -> EvalRun summary).
+  result    Json?
+  status    JobStatus @default(PENDING)
+  attempts  Int       @default(0)
+  claimedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  // Claim query filters on status and orders by createdAt.
+  @@index([status, createdAt])
+}
+
+model EvalRun {
+  id         String   @id @default(cuid())
+  precision  Float
+  recall     Float
+  f1         Float
+  sampleSize Int
+  driftFlag  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+}
+
+// NextAuth Prisma adapter models
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
