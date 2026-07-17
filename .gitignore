@@ -1,10 +1,3 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-# Repo is a frontend/ + backend/ split, so these patterns are deliberately
-# UNANCHORED (no leading slash): a leading slash pins a pattern to the repo root
-# only, which would leave frontend/node_modules and frontend/.next tracked.
-# Unanchored matches at any depth, covering both workspaces.
-
 # dependencies
 node_modules/
 .pnp
@@ -42,7 +35,5 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# Prisma custom-output leftover from the create-next-app template. Currently
-# dead (backend/prisma/schema.prisma uses the default generator output), kept
-# unanchored so it would cover either workspace if a custom output is ever set.
+# Prisma custom-output leftover from the create-next-app template. 
 app/generated/prisma
