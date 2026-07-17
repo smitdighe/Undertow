@@ -22,5 +22,7 @@
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  // backend/ is a sibling of frontend/, not a child, so the `**/*.ts` glob
+  // below cannot reach it and no explicit exclude is needed for it.
   "exclude": ["node_modules"]
 }

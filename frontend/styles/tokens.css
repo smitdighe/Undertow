@@ -1,0 +1,25 @@
+/* Design tokens — the single source of truth for colour in Undertow.
+   tailwind.config.ts binds every one of these onto Tailwind's colour scale, so a
+   value changes here and nowhere else. No ad hoc hex values past this file. */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-void: #0a0a0b;
+  --color-card: #141416;
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-text: #e9e9ec;
+  --color-muted: #8a8a92;
+  --color-lime: #e8ff5e;
+  --color-alert: #ff6b5e;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-void);
+    color: var(--color-text);
+    font-family: var(--font-inter), system-ui, sans-serif;
+  }
+}
