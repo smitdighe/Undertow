@@ -1,0 +1,99 @@
+name: Eval Gate
+
+# NOTE: deliberately NO workflow-level `paths:` filter. A workflow that is
+# filtered out never reports a status at all, so a required check named
+# "Eval Gate" would hang forever on "Expected — waiting" for unrelated PRs.
+# Instead the workflow always runs and detects the paths internally, so exactly
+# one of the two jobs below always reports the required check.
+on:
+  pull_request:
+
+jobs:
+  changes:
+    name: Detect LLM changes
+    runs-on: ubuntu-latest
+    outputs:
+      llm: ${{ steps.filter.outputs.llm }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            llm:
+              - 'backend/lib/llm/**'
+
+  # Both jobs below share `name: Eval Gate` so they report under the same check
+  # name; exactly one runs per PR. Branch protection should require "Eval Gate".
+  eval-gate:
+    name: Eval Gate
+    needs: changes
+    if: needs.changes.outputs.llm == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    # All backend code (package.json, prisma/, scripts/, lib/) lives in backend/.
+    defaults:
+      run:
+        working-directory: backend
+
+    env:
+      # Dedicated eval/staging DB — never production. Must already be migrated
+      # and seeded (npx tsx scripts/seed-historical.ts from backend/), otherwise
+      # the --min-sample check below fails the job loudly.
+      DATABASE_URL: ${{ secrets.EVAL_DATABASE_URL }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+      # Pace the eval loop so free-tier provider RPM limits don't degrade the
+      # run into an exit-2 "sample too small to trust" failure.
+      EVAL_PACE_MS: "4000"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          # setup-node's cache key needs the backend lockfile, not the frontend
+          # one (frontend/package-lock.json). `cache-dependency-path` is not
+          # affected by `defaults.run.working-directory` — action inputs are
+          # repo-relative, hence the explicit backend/ prefix.
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Cache embedding model
+        # transformers.js downloads all-MiniLM-L6-v2 on first use; cache it so
+        # every gate run doesn't re-fetch the weights. Action inputs are
+        # repo-relative, so this path needs the backend/ prefix explicitly.
+        uses: actions/cache@v4
+        with:
+          path: backend/node_modules/@xenova/transformers/.cache
+          key: xenova-all-MiniLM-L6-v2
+
+      - name: Verify eval DB is reachable and migrated
+        run: npx prisma migrate status
+
+      - name: Run eval and gate on drift
+        # Exit codes: 0 ok | 1 drift -> block merge | 2 sample too small.
+        # --min-sample makes an unseeded CI database a loud failure rather than
+        # a silent pass with sampleSize 0.
+        run: npx tsx scripts/eval-runner.ts --fail-on-drift --min-sample 10
+
+  # Companion: satisfies the required "Eval Gate" check for PRs that don't touch
+  # the LLM pipeline, without paying for an eval run.
+  eval-gate-skip:
+    name: Eval Gate
+    needs: changes
+    if: needs.changes.outputs.llm != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: No LLM changes — eval not required
+        run: echo "No changes under lib/llm/** — skipping eval, reporting success."

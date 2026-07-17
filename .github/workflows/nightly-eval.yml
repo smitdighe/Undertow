@@ -1,0 +1,130 @@
+name: Nightly Eval
+
+on:
+  schedule:
+    # 03:00 UTC daily
+    - cron: "0 3 * * *"
+  workflow_dispatch: # allow manual runs from the Actions tab
+
+jobs:
+  trigger-eval:
+    name: Trigger deployed eval endpoint
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      EVAL_URL: ${{ vars.EVAL_URL }} # e.g. https://undertow.example.com
+      CRON_SHARED_SECRET: ${{ secrets.CRON_SHARED_SECRET }}
+
+    steps:
+      - name: POST /api/cron/eval (enqueue)
+        run: |
+          set -euo pipefail
+
+          if [ -z "${EVAL_URL:-}" ]; then
+            echo "::error::EVAL_URL repository variable is not set"
+            exit 1
+          fi
+          if [ -z "${CRON_SHARED_SECRET:-}" ]; then
+            echo "::error::CRON_SHARED_SECRET secret is not set"
+            exit 1
+          fi
+
+          status=$(curl -sS -X POST "${EVAL_URL%/}/api/cron/eval" \
+            -H "x-cron-secret: ${CRON_SHARED_SECRET}" \
+            -H "Content-Type: application/json" \
+            --max-time 30 \
+            -o enqueue.json -w '%{http_code}')
+
+          echo "HTTP ${status}"
+          cat enqueue.json
+          echo
+
+          # The endpoint enqueues and returns 202; it no longer runs the eval
+          # synchronously, so there is no F1/drift in this response.
+          if [ "${status}" != "202" ]; then
+            echo "::error::eval trigger returned HTTP ${status} (expected 202)"
+            exit 1
+          fi
+
+          job_id=$(jq -r '.jobId' enqueue.json)
+          if [ -z "${job_id}" ] || [ "${job_id}" = "null" ]; then
+            echo "::error::no jobId in enqueue response"
+            exit 1
+          fi
+          echo "JOB_ID=${job_id}" >> "$GITHUB_ENV"
+          echo "Enqueued eval job ${job_id}"
+
+      - name: Poll for completion
+        run: |
+          set -euo pipefail
+
+          # The worker claims and runs the job; allow generous time for a full
+          # eval (classify + judge per incident).
+          deadline=$(( $(date +%s) + 1500 ))
+          interval=15
+
+          while :; do
+            status=$(curl -sS "${EVAL_URL%/}/api/cron/eval/${JOB_ID}" \
+              -H "x-cron-secret: ${CRON_SHARED_SECRET}" \
+              --max-time 30 \
+              -o poll.json -w '%{http_code}')
+
+            if [ "${status}" != "200" ]; then
+              echo "::error::status endpoint returned HTTP ${status}"
+              cat poll.json || true
+              exit 1
+            fi
+
+            job_status=$(jq -r '.status' poll.json)
+            done=$(jq -r '.done' poll.json)
+            echo "job ${JOB_ID}: ${job_status}"
+
+            if [ "${done}" = "true" ]; then
+              break
+            fi
+
+            if [ "$(date +%s)" -ge "${deadline}" ]; then
+              echo "::error::timed out waiting for eval job ${JOB_ID} (last status: ${job_status})"
+              exit 1
+            fi
+            sleep "${interval}"
+          done
+
+          cat poll.json
+          echo
+
+          if [ "$(jq -r '.status' poll.json)" = "FAILED" ]; then
+            echo "::error::eval job ${JOB_ID} FAILED after $(jq -r '.attempts' poll.json) attempts"
+            exit 1
+          fi
+
+      - name: Surface drift
+        run: |
+          set -euo pipefail
+
+          written=$(jq -r '.result.written' poll.json)
+          if [ "${written}" != "true" ]; then
+            echo "::error::eval produced no EvalRun (no ground truth in the database)"
+            exit 1
+          fi
+
+          drift=$(jq -r '.result.drift.driftFlag' poll.json)
+          f1=$(jq -r '.result.aggregate.f1' poll.json)
+          n=$(jq -r '.result.sampleSize' poll.json)
+          run_id=$(jq -r '.result.evalRunId' poll.json)
+
+          echo "F1=${f1} sampleSize=${n} driftFlag=${drift}"
+          {
+            echo "### Nightly eval"
+            echo "- EvalRun: \`${run_id}\`"
+            echo "- F1: \`${f1}\`"
+            echo "- sampleSize: \`${n}\`"
+            echo "- driftFlag: \`${drift}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Nightly reports drift loudly but does not "fail the build" for a
+          # scheduled run — eval-gate.yml is what blocks merges.
+          if [ "${drift}" = "true" ]; then
+            echo "::warning::Eval drift detected on nightly run (F1=${f1})"
+          fi
