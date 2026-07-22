@@ -438,37 +438,21 @@ signal that classification is still pending.
 
 ## ⚠️ Known Limitations
 
-- **No `GET /api/eval-runs` history route.** It does not exist. `/admin/metrics` therefore runs
-  in degraded single-point mode: it renders one run resolved from `?jobId=`, draws no gate line
-  (a rolling average needs prior runs), and says so inline rather than showing an empty chart.
-- **No route to discover the most recent job id.** `?jobId=` must be supplied by hand from a
-  completed eval job. Nothing enumerates them.
-- **No self-serve ONCALL promotion.** Every account defaults to `VIEWER`; the only way to grant
-  `ONCALL` is a manual `UPDATE` against the database.
-- **`CRON_SHARED_SECRET` is backend-only by design.** The frontend's `?jobId=` fallback reads it
-  server-side only if present, and prints an explicit note when it is absent. **This is
-  intentional, not a bug** — the secret gates eval triggering and scores, and a
-  `NEXT_PUBLIC_` copy would be readable in devtools.
-- **SSE reconnect degrades to polling; it does not guarantee a persistent connection.** After 4
-  consecutive failures the client stops retrying SSE and polls `GET /api/incidents` on an
-  interval, re-probing SSE every 60s. The connection indicator reports the real transport state
-  rather than optimistically claiming "live".
-- **`GET /api/incidents` and `GET /api/incidents/stream` are unauthenticated.** Any client that
-  can reach the backend can read every incident title, body, and classification. Only
-  corrections are role-gated.
-- **The frontend duplicates the backend's drift rule.** `frontend/features/eval-metrics/drift.ts`
-  re-implements `DRIFT_THRESHOLD`, `ROLLING_WINDOW`, and `MIN_TRUSTWORTHY_SAMPLE` because
-  `EvalRun` persists only the boolean `driftFlag`, not the threshold it was judged against. The
-  constants are duplicated across two npm projects with no shared import path — change one,
-  change the other.
-- **Dedupe is an O(n) scan over all open incidents,** loading every embedding into memory per
-  webhook. Fine at current volume; it will not hold at scale without a vector index.
-- **No provider attribution on the incident row.** Which LLM classified an incident is logged
-  but never persisted, so `ProviderTicker` renders nothing. Surfacing it needs a schema field.
-- **No test suite.** Correctness rests on zod boundaries, TypeScript, and the eval gate.
-- **Not deployed.** No hosting configuration exists in the repo. The worker needs an always-on
-  process and the SSE route needs a long-lived connection, so neither fits a serverless
-  function without changes.
+- **`/admin/metrics` runs in degraded single-point mode.** There is no `GET /api/eval-runs`
+  history route and nothing enumerates job ids, so a run must be resolved from a hand-supplied
+  `?jobId=`, no gate line is drawn (a rolling average needs prior runs), and the page says so
+  inline rather than showing an empty chart. For the same reason
+  `frontend/features/eval-metrics/drift.ts` re-implements `DRIFT_THRESHOLD`, `ROLLING_WINDOW`,
+  and `MIN_TRUSTWORTHY_SAMPLE` — `EvalRun` persists only the boolean `driftFlag`, so the rule is
+  duplicated across two npm projects with no shared import path.
+- **The incident read paths are unauthenticated.** Any client that can reach the backend can
+  read every incident via `GET /api/incidents` and `GET /api/incidents/stream`; only corrections
+  are role-gated. Roles themselves are not self-serve either — every account defaults to
+  `VIEWER` and `ONCALL` is granted by a manual `UPDATE` against the database.
+- **Not deployed, and not built for scale yet.** No hosting configuration exists in the repo
+  (the worker needs an always-on process, the SSE route a long-lived connection), there is no
+  test suite — correctness rests on zod boundaries, TypeScript, and the eval gate — and dedupe
+  is an O(n) scan loading every open incident's embedding into memory per webhook.
 
 ## 🔮 Future Improvements
 
