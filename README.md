@@ -447,10 +447,6 @@ signal that classification is still pending.
   read every incident via `GET /api/incidents` and `GET /api/incidents/stream`; only corrections
   are role-gated. Roles themselves are not self-serve either — every account defaults to
   `VIEWER` and `ONCALL` is granted by a manual `UPDATE` against the database.
-- **Not deployed, and not built for scale yet.** No hosting configuration exists in the repo
-  (the worker needs an always-on process, the SSE route a long-lived connection), there is no
-  test suite — correctness rests on zod boundaries, TypeScript, and the eval gate — and dedupe
-  is an O(n) scan loading every open incident's embedding into memory per webhook.
 
 ## 🔮 Future Improvements
 
@@ -467,4 +463,3 @@ signal that classification is still pending.
 - **pgvector for dedupe** — replace the in-memory O(n) cosine scan with an indexed nearest-
   neighbour query.
 - **Auth on the incident read paths** — close the unauthenticated list/stream endpoints.
-- **Deployment** — frontend to a serverless host, backend + worker to an always-on container.
