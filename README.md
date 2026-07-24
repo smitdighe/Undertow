@@ -1,6 +1,6 @@
 <div align="center">
 
- <pre>
+<pre>
 ██╗   ██╗ ███╗   ██╗ ██████╗  ███████╗ ██████╗  ████████╗  ██████╗  ██╗    ██╗
 ██║   ██║ ████╗  ██║ ██╔══██╗ ██╔════╝ ██╔══██╗ ╚══██╔══╝ ██╔═══██╗ ██║    ██║
 ██║   ██║ ██╔██╗ ██║ ██║  ██║ █████╗   ██████╔╝    ██║    ██║   ██║ ██║ █╗ ██║
@@ -266,6 +266,7 @@ Undertow/
     ├── app/api/
     │   ├── auth/[...nextauth]/ # NextAuth handler
     │   ├── cron/eval/          # POST enqueue (202) + GET [jobId] status
+    │   ├── eval-runs/          # GET paginated EvalRun history (session-gated)
     │   ├── incidents/          # GET list, [id]/correct, stream (SSE)
     │   ├── register/           # POST create account
     │   └── webhook/            # POST GitHub ingestion
@@ -413,6 +414,7 @@ rewrite in normal use.
 | `GET`/`POST` | `/api/auth/[...nextauth]` | — | NextAuth (GitHub OAuth + credentials) |
 | `POST` | `/api/cron/eval` | `x-cron-secret` | Enqueue an EVAL job → `202 { jobId }` |
 | `GET` | `/api/cron/eval/[jobId]` | `x-cron-secret` | Poll eval job status + resulting `EvalRun` |
+| `GET` | `/api/eval-runs` | Session (**VIEWER**+) | Paginated `EvalRun` history, newest first. `limit` (1–100, default 50), opaque `cursor` → `{ runs, nextCursor }` |
 
 `POST /api/incidents/[id]/correct` accepts `{ field: "severity" | "team" | "duplicate",
 correctedValue: string }` and returns `400` on an invalid severity or a self-referential
@@ -436,13 +438,13 @@ signal that classification is still pending.
 
 ## ⚠️ Known Limitations
 
-- **`/admin/metrics` runs in degraded single-point mode.** There is no `GET /api/eval-runs`
-  history route and nothing enumerates job ids, so a run must be resolved from a hand-supplied
-  `?jobId=`, no gate line is drawn (a rolling average needs prior runs), and the page says so
-  inline rather than showing an empty chart. For the same reason
-  `frontend/features/eval-metrics/drift.ts` re-implements `DRIFT_THRESHOLD`, `ROLLING_WINDOW`,
-  and `MIN_TRUSTWORTHY_SAMPLE` — `EvalRun` persists only the boolean `driftFlag`, so the rule is
-  duplicated across two npm projects with no shared import path.
+- **`/admin/metrics` re-derives the drift rule client-side.** `GET /api/eval-runs` now backs the
+  page with real history, so the drift chart draws its rolling average and gate line from actual
+  runs and the `?jobId=` path is only a fallback for when the route is unavailable. But `EvalRun`
+  persists just the boolean `driftFlag` — not the `rollingAvg` or `threshold` it was judged
+  against — so `frontend/features/eval-metrics/drift.ts` still re-implements `DRIFT_THRESHOLD`,
+  `ROLLING_WINDOW`, and `MIN_TRUSTWORTHY_SAMPLE` to reconstruct the gate line, duplicating the
+  rule across two npm projects with no shared import path.
 - **The incident read paths are unauthenticated.** Any client that can reach the backend can
   read every incident via `GET /api/incidents` and `GET /api/incidents/stream`; only corrections
   are role-gated. Roles themselves are not self-serve either — every account defaults to
@@ -450,11 +452,6 @@ signal that classification is still pending.
 
 ## 🔮 Future Improvements
 
-- **`GET /api/eval-runs` history route** — the single highest-value gap. It would take
-  `/admin/metrics` out of degraded mode, restore the drift chart's gate line and rolling
-  average, and make the `?jobId=` fallback path unnecessary. The frontend client
-  (`listEvalRunsOrNull`) is already written against the agreed contract and resolves `null` on
-  404, so shipping the route requires no frontend change.
 - **Self-serve ONCALL promotion** — an admin-gated role management surface, replacing manual SQL.
 - **Persist the classifying provider** on `Incident` (e.g. `classifiedBy`) so `ProviderTicker`
   can show real Groq/Cerebras attribution instead of rendering null.
