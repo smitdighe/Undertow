@@ -1,3 +1,4 @@
+// CI check: touches backend/lib/llm/** to exercise the Eval Gate workflow.
 import { classifyWithGroq } from "@/lib/llm/groq";
 import { classifyWithCerebras } from "@/lib/llm/cerebras";
 import { Classification, LLMError, LLMProvider } from "@/lib/llm/types";
