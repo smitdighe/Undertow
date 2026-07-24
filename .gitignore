@@ -37,3 +37,4 @@ next-env.d.ts
 
 # Prisma custom-output leftover from the create-next-app template. 
 app/generated/prisma
+.claude/
